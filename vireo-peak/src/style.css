@@ -79,6 +79,38 @@ html.motion .scroll-track {
   background-position: center;
 }
 
+/* Hero canvas draws the scrubbed image sequence; before frames load it shows
+   the poster (set inline) via the shared .section__video background rules. */
+.section__canvas {
+  display: block;
+}
+
+/* Hero preloader — a slim indeterminate bar at the base of the hero. */
+.hero-loader {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  height: 2px;
+  overflow: hidden;
+  background: rgba(242, 237, 230, 0.15);
+}
+.hero-loader span {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: var(--dawn-gold);
+  animation: hero-load 1.1s ease-in-out infinite;
+}
+@keyframes hero-load {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-loader span { animation: none; }
+}
+
 /* Dark readability gradient over the video */
 .section__scrim {
   position: absolute;

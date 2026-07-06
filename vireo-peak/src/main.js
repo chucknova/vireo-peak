@@ -77,14 +77,22 @@ app.innerHTML = `
       .map(
         (s, i) => `
       <section class="section" id="section-${i + 1}">
-        <video
+        ${
+          i === 0
+            ? `<canvas
+          class="section__video section__canvas hero-loading"
+          data-hero-canvas
+          style="background-image: url(/media/${s.file}.jpg)"></canvas>
+        <div class="hero-loader" data-hero-loader><span></span></div>`
+            : `<video
           class="section__video"
           muted loop playsinline
-          preload="${i === 0 ? "auto" : "metadata"}"
+          preload="metadata"
           poster="/media/${s.file}.jpg">
           <source src="/media/${s.file}.webm" type="video/webm" />
           <source src="/media/${s.file}.mp4" type="video/mp4" />
-        </video>
+        </video>`
+        }
         <div class="section__scrim"></div>
         <div class="section__content">
           <p class="section__eyebrow">${s.eyebrow}</p>
@@ -107,33 +115,90 @@ const TRADE_WIND = css.getPropertyValue("--trade-wind-sky").trim();
 
 const track = document.querySelector(".scroll-track");
 const sectionEls = [...document.querySelectorAll(".section")];
-const videoEls = [...document.querySelectorAll(".section__video")];
 
 /* ------------------------------------------------------------------ *
- * Active-video playback.
+ * Video playback.
  *
- * In crossfade mode every section is stacked in a fixed stage, so nothing
- * is ever geometrically off-screen — an IntersectionObserver can't tell
- * which section is active. Instead we play whichever section is currently
- * the most opaque and pause the rest.
+ * Every section is stacked in a fixed stage, so nothing is ever
+ * geometrically off-screen — an IntersectionObserver can't tell which
+ * section is active. We drive playback from opacity instead: any section
+ * that is at all visible plays, so BOTH clips keep moving through a
+ * crossfade (essential for the scale-through to read as one camera move);
+ * fully-hidden sections pause. Section 1's layer is a <canvas>, not a
+ * <video>, so it's simply skipped here.
  * ------------------------------------------------------------------ */
-let activeVideo = videoEls[0];
-function updateActiveVideo() {
-  let best = 0;
-  let bestOpacity = -1;
-  sectionEls.forEach((section, i) => {
-    const opacity = Number(gsap.getProperty(section, "opacity"));
-    if (opacity > bestOpacity) {
-      bestOpacity = opacity;
-      best = i;
+function updateVideoPlayback() {
+  sectionEls.forEach((section) => {
+    const v = section.querySelector("video.section__video");
+    if (!v) return; // hero canvas — no <video> to drive
+    const visible = Number(gsap.getProperty(section, "opacity")) > 0.02;
+    if (visible && v.paused) v.play().catch(() => {});
+    else if (!visible && !v.paused) v.pause();
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Hero (section 1) scroll-scrubbed image sequence.
+ *
+ * Replaces the hero video with a <canvas> that draws /seq/hero frames, the
+ * frame index tied to scroll progress over a pinned ~150vh. Every frame is
+ * preloaded before the scrub effect is enabled; until then the canvas shows
+ * the poster and a loader.
+ * ------------------------------------------------------------------ */
+const HERO_FRAME_COUNT = 193;
+const HERO_PINNED_VH = 1.5; // ~150vh of scroll drives the sequence
+const heroFrameUrl = (n) =>
+  `/seq/hero/frame-${String(n).padStart(4, "0")}.jpg`;
+
+function setupHeroSequence({ enableScrub }) {
+  const canvas = document.querySelector("[data-hero-canvas]");
+  const loader = document.querySelector("[data-hero-loader]");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const frames = [];
+
+  const draw = (i) => {
+    const img = frames[Math.max(0, Math.min(HERO_FRAME_COUNT - 1, i))];
+    if (img && img.complete) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  };
+
+  // Preload every frame; resolve once all have settled (load or error).
+  let settled = 0;
+  const done = new Promise((resolve) => {
+    for (let n = 1; n <= HERO_FRAME_COUNT; n++) {
+      const img = new Image();
+      img.onload = img.onerror = () => {
+        if (++settled === HERO_FRAME_COUNT) resolve();
+      };
+      img.src = heroFrameUrl(n);
+      frames[n - 1] = img;
     }
   });
-  const wanted = videoEls[best];
-  if (wanted !== activeVideo) {
-    activeVideo.pause();
-    activeVideo = wanted;
-    activeVideo.play().catch(() => {});
-  }
+
+  done.then(() => {
+    // Size the canvas buffer to the native frame, draw frame 0, drop loader.
+    const first = frames.find((f) => f.naturalWidth) || frames[0];
+    canvas.width = first.naturalWidth || 1280;
+    canvas.height = first.naturalHeight || 720;
+    draw(0);
+    canvas.classList.remove("hero-loading");
+    if (loader) loader.remove();
+
+    if (!enableScrub) return; // reduced motion: static first frame only
+
+    // Frame index tied to scroll progress across a pinned ~150vh.
+    ScrollTrigger.create({
+      trigger: "#app",
+      start: "top top",
+      end: () => "+=" + window.innerHeight * HERO_PINNED_VH,
+      scrub: true,
+      invalidateOnRefresh: true,
+      onUpdate: (self) => {
+        draw(Math.round(self.progress * (HERO_FRAME_COUNT - 1)));
+      },
+    });
+    ScrollTrigger.refresh();
+  });
 }
 
 /* ------------------------------------------------------------------ *
@@ -151,10 +216,21 @@ if (!prefersReducedMotion) {
   gsap.ticker.add((time) => lenis.raf(time * 1000));
   gsap.ticker.lagSmoothing(0);
 
+  const LAST = sectionEls.length - 1;
+  const HOLD = 0.72; // point in each slot where the exit/crossfade begins
+  const D = 0.3; // crossfade duration (timeline units)
+  // Boundaries that use a scale-through instead of a plain dissolve:
+  // 1->2 (outgoing index 0) and 7->8 (outgoing index 6).
+  const SCALE_THROUGH = new Set([0, 6]);
+  const THROUGH_SCALE = 1.6; // how hard the outgoing clip zooms past
+
   // Initial stacked state: only the first section is visible; every
   // section's content starts hidden, every eyebrow starts Trade Wind Sky.
   gsap.set(sectionEls, { autoAlpha: 0 });
   gsap.set(sectionEls[0], { autoAlpha: 1 });
+  // A scale-through's outgoing clip must sit ABOVE its incoming neighbour so
+  // it can zoom past and reveal the incoming scaling up behind it.
+  SCALE_THROUGH.forEach((i) => gsap.set(sectionEls[i], { zIndex: 5 }));
   sectionEls.forEach((section) => {
     gsap.set([...section.querySelector(".section__content").children], {
       yPercent: 40,
@@ -163,19 +239,17 @@ if (!prefersReducedMotion) {
     gsap.set(section.querySelector(".section__eyebrow"), { color: TRADE_WIND });
   });
 
-  // Start the first video; the rest stay paused until they become active.
-  videoEls.forEach((v, i) => (i === 0 ? v.play().catch(() => {}) : v.pause()));
+  // Play whatever's visible now (section 0); pause the rest.
+  updateVideoPlayback();
 
-  // A single timeline scrubbed across the whole track. Each section owns a
-  // one-unit slot: reveal its content + drive the eyebrow to Dawn Gold, then
-  // dissolve into the next section during the tail of the slot.
+  // A single timeline scrubbed across the whole track.
   const master = gsap.timeline({
     scrollTrigger: {
       trigger: "#app",
       start: "top top",
       end: "bottom bottom",
       scrub: true,
-      onUpdate: updateActiveVideo,
+      onUpdate: updateVideoPlayback,
     },
   });
 
@@ -184,26 +258,68 @@ if (!prefersReducedMotion) {
     const eyebrow = section.querySelector(".section__eyebrow");
     const video = section.querySelector(".section__video");
 
-    // Reveal + Dawn Gold color drive + slow video push-in over the slot.
+    // Each clip gets a continuous push-in across its whole visible lifespan
+    // — from when it fades in (the previous boundary) to when it finishes
+    // leaving (its own boundary). Scale stays >= 1 so the cover video never
+    // reveals its edges.
+    const appear = i === 0 ? 0 : i - (1 - HOLD);
+    const videoEnd = i === LAST ? sectionEls.length : i + 1;
+    const isThroughOut = SCALE_THROUGH.has(i); // outgoing side of a scale-through
+    const isThroughIn = SCALE_THROUGH.has(i - 1); // incoming side of a scale-through
+
+    if (isThroughIn) {
+      // Scale-through incoming: rush forward hard DURING the handoff window so
+      // it visibly flies in behind the outgoing zoom, then continue scaling up
+      // gently through the rest of the slot.
+      const RUSH = 1.2;
+      master
+        .fromTo(video, { scale: 1.0 }, { scale: RUSH, ease: "power2.out", duration: D }, appear)
+        .to(video, { scale: 1.28, ease: "none", duration: videoEnd - (appear + D) }, appear + D);
+    } else {
+      // Scale-through exits accelerate to a hard zoom; everything else drifts.
+      master.fromTo(
+        video,
+        { scale: 1.0 },
+        {
+          scale: isThroughOut ? THROUGH_SCALE : 1.12,
+          ease: isThroughOut ? "power2.in" : "none",
+          duration: videoEnd - appear,
+        },
+        appear
+      );
+    }
+
+    // Reveal content + Dawn Gold color drive at the start of the slot.
     master
       .to(items, { yPercent: 0, autoAlpha: 1, ease: "power2.out", stagger: 0.08, duration: 0.35 }, i)
-      .to(eyebrow, { color: DAWN_GOLD, ease: "none", duration: 0.6 }, i)
-      .fromTo(video, { scale: 1.0 }, { scale: 1.12, ease: "none", duration: 1 }, i);
+      .to(eyebrow, { color: DAWN_GOLD, ease: "none", duration: 0.6 }, i);
 
-    // Crossfade into the next section during the last third of this slot.
-    if (i < sectionEls.length - 1) {
-      const next = sectionEls[i + 1];
-      master
-        .to(items, { yPercent: -20, autoAlpha: 0, ease: "power1.in", duration: 0.3 }, i + 0.72)
-        .to(section, { autoAlpha: 0, ease: "none", duration: 0.3 }, i + 0.72)
-        .to(next, { autoAlpha: 1, ease: "none", duration: 0.3 }, i + 0.72);
-    }
+    if (i === LAST) return;
+
+    const next = sectionEls[i + 1];
+    const t = i + HOLD; // transition window: [i+HOLD, i+1]
+
+    // Content leaves.
+    master.to(items, { yPercent: -20, autoAlpha: 0, ease: "power1.in", duration: D }, t);
+
+    // Background crossfade — both clips stay mounted and playing. For a
+    // scale-through the outgoing eases out later (power2.in) so its zoom is
+    // still dominant as it dissolves, reading as one continuous push.
+    master
+      .to(section, { autoAlpha: 0, ease: SCALE_THROUGH.has(i) ? "power2.in" : "none", duration: D }, t)
+      .fromTo(next, { autoAlpha: 0 }, { autoAlpha: 1, ease: "none", duration: D }, t);
   });
 
   ScrollTrigger.refresh();
+
+  // Hero: preload frames, then enable the scroll-scrubbed sequence.
+  setupHeroSequence({ enableScrub: true });
 } else {
   // Reduced motion: no .motion class, so sections fall back to normal-flow
   // full-viewport panels. Show all content, pause every video (poster shows).
   gsap.set(".section__content > *", { autoAlpha: 1, y: 0 });
-  videoEls.forEach((v) => v.pause());
+  document.querySelectorAll("video.section__video").forEach((v) => v.pause());
+
+  // Hero: still preload + draw a static first frame, but no scrub.
+  setupHeroSequence({ enableScrub: false });
 }
