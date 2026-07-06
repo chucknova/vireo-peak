@@ -1,0 +1,185 @@
+@import "./tokens.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Lenis smooth-scroll wiring */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+/* ---- Stage / scroll track ----
+   Default (no-JS / reduced motion): .stage is a normal block, sections flow
+   as full-viewport panels, and the scroll track is inert.
+   Motion mode (html.motion): the stage is pinned to the viewport and its
+   sections are stacked so they can crossfade; the track supplies scroll length. */
+.scroll-track {
+  display: none;
+}
+
+html.motion .stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+html.motion .section {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+}
+
+html.motion .scroll-track {
+  display: block;
+}
+
+/* ---- Section shell ---- */
+.section {
+  position: relative;
+  height: 100vh;
+  height: 100svh;
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+}
+
+/* Full-bleed background video */
+.section__video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+  /* poster shows until the video paints */
+  background-color: var(--surface);
+  background-size: cover;
+  background-position: center;
+}
+
+/* Dark readability gradient over the video */
+.section__scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--scrim);
+  pointer-events: none;
+}
+
+/* Overlaid headline block */
+.section__content {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 clamp(1.5rem, 5vw, 5rem) clamp(3rem, 10vh, 7rem);
+}
+
+.section__eyebrow {
+  font-family: var(--font-body);
+  font-size: clamp(0.75rem, 1.2vw, 0.95rem);
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 1rem;
+}
+
+.section__title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: clamp(2.75rem, 8vw, 6.5rem);
+  line-height: 0.98;
+  letter-spacing: -0.01em;
+  margin: 0 0 1rem;
+  color: var(--ink);
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.35);
+  max-width: 15ch;
+}
+
+.section__lede {
+  font-family: var(--font-body);
+  font-size: clamp(1rem, 1.8vw, 1.35rem);
+  line-height: 1.5;
+  color: var(--ink-muted);
+  max-width: 46ch;
+  margin: 0;
+  text-shadow: 0 1px 16px rgba(0, 0, 0, 0.45);
+}
+
+/* Accent rule under the eyebrow, keyed to the section */
+.section__eyebrow::before {
+  content: "";
+  display: inline-block;
+  width: 2.5rem;
+  height: 1px;
+  margin-right: 0.9rem;
+  vertical-align: middle;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+/* ---- Fixed brand + scroll cue ---- */
+.brand {
+  position: fixed;
+  top: clamp(1.25rem, 3vh, 2rem);
+  left: clamp(1.5rem, 5vw, 3rem);
+  z-index: 10;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  mix-blend-mode: difference;
+}
+
+.scroll-cue {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink);
+  mix-blend-mode: difference;
+  animation: bob 2.4s ease-in-out infinite;
+}
+
+@keyframes bob {
+  0%, 100% { transform: translate(-50%, 0); }
+  50%      { transform: translate(-50%, 6px); }
+}
+
+/* ---- Reduced motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  .scroll-cue {
+    animation: none;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}
